@@ -22,7 +22,7 @@ function ConversionForm() {
           id="conversions"
           type="number"
           value={conversions}
-          onChange={(e) => setConversions(Number(e.target.value))}
+          onChange={(e) => setConversions(e.target.value)}
           placeholder="Enter number of conversions"
           className="form-input"
         />
@@ -36,7 +36,7 @@ function ConversionForm() {
           id="visitors"
           type="number"
           value={visitors}
-          onChange={(e) => setVisitors(Number(e.target.value))}
+          onChange={(e) => setVisitors(e.target.value)}
           placeholder="Enter number of visitors"
           className="form-input"
         />
