@@ -6,7 +6,7 @@ require('dotenv').config();
 
 const app = express();
 
-// Initialize Sentry BEFORE other middleware
+// Initialize Sentry - SDK v8 style
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
   integrations: [
@@ -27,11 +27,6 @@ Sentry.init({
   environment: "production",
 });
 
-// Sentry request handler must be the first middleware
-app.use(Sentry.Handlers.requestHandler());
-// TracingHandler creates a trace for every incoming request
-app.use(Sentry.Handlers.tracingHandler());
-
 // Regular middleware
 app.use(cors());
 app.use(express.json());
@@ -40,40 +35,37 @@ app.use(express.json());
 app.post('/api/calculate-conversion', (req, res) => {
   const { conversions, visitors } = req.body;
 
-  // Add span for calculation
-  const span = Sentry.startInactiveSpan({
-    name: 'calculate-conversion-rate',
-    op: 'function',
-  });
+  return Sentry.startSpan(
+    {
+      name: 'POST /api/calculate-conversion',
+      op: 'http.server',
+    },
+    () => {
+      try {
+        // This is where the bug occurs - division by zero when visitors = 0
+        if (visitors === 0) {
+          throw new Error('Cannot calculate conversion rate: visitor count is zero. This may indicate a data synchronization issue or tracking misconfiguration.');
+        }
 
-  try {
-    // This is where the bug occurs - division by zero when visitors = 0
-    if (visitors === 0) {
-      throw new Error('Cannot calculate conversion rate: visitor count is zero. This may indicate a data synchronization issue or tracking misconfiguration.');
+        const rate = ((conversions / visitors) * 100).toFixed(2);
+        res.json({ rate: parseFloat(rate) });
+      } catch (error) {
+        // Capture error in Sentry with additional context
+        Sentry.captureException(error, {
+          tags: {
+            endpoint: 'calculate-conversion',
+            error_type: 'division_by_zero',
+          },
+          extra: {
+            conversions,
+            visitors,
+          },
+        });
+
+        res.status(400).json({ error: error.message });
+      }
     }
-
-    const rate = ((conversions / visitors) * 100).toFixed(2);
-
-    span?.end();
-
-    res.json({ rate: parseFloat(rate) });
-  } catch (error) {
-    span?.end();
-
-    // Capture error in Sentry with additional context
-    Sentry.captureException(error, {
-      tags: {
-        endpoint: 'calculate-conversion',
-        error_type: 'division_by_zero',
-      },
-      extra: {
-        conversions,
-        visitors,
-      },
-    });
-
-    res.status(400).json({ error: error.message });
-  }
+  );
 });
 
 // Health check endpoint
@@ -81,12 +73,10 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Sentry error handler must be before any other error middleware
-app.use(Sentry.Handlers.errorHandler());
-
-// Optional: Additional error handler
+// Global error handler
 app.use((err, _req, res, _next) => {
   console.error(err.stack);
+  Sentry.captureException(err);
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
